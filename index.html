@@ -119,6 +119,16 @@ textarea:focus,input:focus,button:focus-visible,a:focus-visible,video:focus-visi
     <div class="step-head"><span class="lane">LANE 1</span><h2 id="s1">Rate the gala</h2></div>
 
     <div class="field">
+      <label class="q" for="swimmer">Swimmer's name</label>
+      <input id="swimmer" autocomplete="off" placeholder="e.g. Aarav Sharma" required>
+    </div>
+
+    <div class="field">
+      <label class="q" for="name">Parent's name <span class="hint">(optional)</span></label>
+      <input id="name" autocomplete="name" placeholder="e.g. Priya Sharma">
+    </div>
+
+    <div class="field">
       <span class="q" id="galaLabel">How was the 4th Gala overall?</span>
       <div class="stars" role="radiogroup" aria-labelledby="galaLabel" id="galaStars"></div>
       <p class="rating-word" id="galaWord">Tap a star</p>
@@ -159,14 +169,11 @@ textarea:focus,input:focus,button:focus-visible,a:focus-visible,video:focus-visi
       <input id="fakeehNote" placeholder="What did your child like most? (optional)">
     </div>
 
-    <div class="field">
-      <label class="q" for="name">Your name <span class="hint">(optional)</span></label>
-      <input id="name" autocomplete="name" placeholder="e.g. Priya, mum of Aarav">
-    </div>
-
     <p class="preview" id="preview" aria-live="polite"></p>
-    <a class="btn btn-wa" id="waBtn" target="_blank" rel="noopener" href="#" aria-disabled="true">Send my feedback on WhatsApp</a>
-    <p class="note">This opens WhatsApp with your answers ready to send to BASA (+971 50 125 1829). Nothing is sent until you tap send.</p>
+    <button class="btn btn-copy" id="sendBtn" type="button" aria-disabled="true">Send my feedback</button>
+    <p class="toast" id="sendMsg" aria-live="polite"></p>
+    <a class="btn btn-wa" id="waBtn" target="_blank" rel="noopener" href="#" aria-disabled="true">Also send it on WhatsApp</a>
+    <p class="note">Optional: opens WhatsApp with your answers ready to send to BASA (+971 50 125 1829).</p>
   </section>
 
   <div class="rope" aria-hidden="true"></div>
@@ -193,6 +200,8 @@ textarea:focus,input:focus,button:focus-visible,a:focus-visible,video:focus-visi
 
 <script>
 const WA = "971501251829";
+const SHEET_URL = "https://script.google.com/macros/s/AKfycbw-jtiC-qtok-MzIEuEOw9F_newYXLg40R92r0ubA65qnW2Zd-1OfQy25tRtwr_GBEr/exec";
+let sent = false;
 const words = ["", "Poor", "Fair", "Good", "Very good", "Excellent"];
 const tags = ["Races & organisation","Our coaches","Medals & ceremony","Snacks & hospitality","The venue","Atmosphere & crowd"];
 const scores = { gala: 0, bake: 0, fakeeh: 0 };
@@ -220,11 +229,12 @@ tags.forEach(t => {
   b.onclick = () => { picked.has(t) ? picked.delete(t) : picked.add(t); update(); };
   chips.appendChild(b);
 });
-["comment", "name", "bakeNote", "fakeehNote"].forEach(id => $(id).addEventListener("input", update));
+["swimmer", "comment", "name", "bakeNote", "fakeehNote"].forEach(id => $(id).addEventListener("input", update));
 
 const starLine = n => "★".repeat(n) + "☆".repeat(5 - n) + " (" + words[n] + ")";
 function message() {
   const L = ["BASA 4th Annual Swimming Gala – parent feedback"];
+  const sw = $("swimmer").value.trim(); if (sw) L.push("Swimmer: " + sw);
   if (scores.gala) L.push("Gala: " + starLine(scores.gala));
   if (picked.size) L.push("Enjoyed: " + [...picked].join(", "));
   const c = $("comment").value.trim(); if (c) L.push("Comment: " + c);
@@ -248,13 +258,40 @@ function update() {
   paint($("galaStars"), scores.gala); paint($("bakeStars"), scores.bake); paint($("fakeehStars"), scores.fakeeh);
   $("galaWord").textContent = scores.gala ? words[scores.gala] : "Tap a star";
   [...chips.children].forEach(b => b.setAttribute("aria-pressed", String(picked.has(b.textContent))));
-  const ready = scores.gala > 0;
-  $("preview").textContent = ready ? message() : "Your message will appear here once you rate the gala in Lane 1.";
+  const ready = isReady();
+  $("preview").textContent = ready ? message() : "Add the swimmer's name and rate the gala in Lane 1, and your answers will appear here.";
+  $("sendBtn").setAttribute("aria-disabled", String(!ready || sent));
   const wa = $("waBtn");
   wa.href = ready ? "https://wa.me/" + WA + "?text=" + encodeURIComponent(message()) : "#";
   wa.setAttribute("aria-disabled", String(!ready));
 }
-$("waBtn").addEventListener("click", e => { if (!scores.gala) e.preventDefault(); });
+function isReady() { return scores.gala > 0 && $("swimmer").value.trim() !== ""; }
+function payload() {
+  return {
+    swimmer: $("swimmer").value.trim(), parent: $("name").value.trim(),
+    gala: scores.gala, enjoyed: [...picked].join(", "), comment: $("comment").value.trim(),
+    bake: scores.bake || "", bakeNote: $("bakeNote").value.trim(),
+    fakeeh: scores.fakeeh || "", fakeehNote: $("fakeehNote").value.trim()
+  };
+}
+async function save() {
+  if (sent) return true;
+  try {
+    await fetch(SHEET_URL, { method: "POST", mode: "no-cors", keepalive: true,
+      headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload()) });
+    sent = true; return true;
+  } catch (err) { return false; }
+}
+$("sendBtn").addEventListener("click", async () => {
+  if (sent) return;
+  if (!isReady()) { $("sendMsg").textContent = "Please add the swimmer's name and rate the gala in Lane 1 first."; return; }
+  const b = $("sendBtn"); b.setAttribute("aria-disabled", "true"); b.textContent = "Sending…";
+  const ok = await save();
+  b.textContent = ok ? "Sent ✓" : "Send my feedback";
+  $("sendMsg").textContent = ok ? "Thank you! Your feedback has reached BASA." : "That didn't go through. Check your connection and tap Send again.";
+  update();
+});
+$("waBtn").addEventListener("click", e => { if (!isReady()) { e.preventDefault(); $("sendMsg").textContent = "Please add the swimmer's name and rate the gala in Lane 1 first."; return; } save().then(update); });
 $("copyBtn").addEventListener("click", async () => {
   const t = googleText();
   if (!t) { $("toast").textContent = "Write a comment in Lane 1 first, or type straight into Google."; return; }
